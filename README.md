@@ -1,2 +1,2 @@
 # skedulemanager
-Code for managing Skedules
+Simple Python wrapper for skedules.io REST API
