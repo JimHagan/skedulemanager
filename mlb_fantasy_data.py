@@ -10,6 +10,9 @@ from config import ENV
 from game_base import GameInfo, GameInfoAPI
 from datetime import datetime, timedelta
 
+from slugify import slugify
+from team_info import MLB_TEAM_DICT
+
 requests.adapters.DEFAULT_RETRIES = 3
 
 MLB_FANTASY_DATA_REQUEST_HEADERS = {
@@ -22,6 +25,7 @@ MLB_GAME_BASE_URL = 'https://api.fantasydata.net/mlb/v2/'
 VALID_QUERY_TYPES = ['GamesByDate']
 
 DATE_CUTOFF = datetime(2017, 5, 15, 10)  # so we do not conflict with games we created manually
+
 
 class MLBFantasyDataGameAPI(GameInfoAPI):
     """
@@ -94,15 +98,47 @@ class MLBFantasyDataGameAPI(GameInfoAPI):
         return self.game_info_list
 
 
-def mlb_get_scheduled_game_info(_stdout=sys.stdout):
-    now = datetime.now(pytz.utc)  # + timedelta(days=1)
-    two_weeks_from_now = now + timedelta(days=5)
-    diff = two_weeks_from_now - now
-    games = []
-    for i in range(diff.days + 1):
-        current_date = (now + timedelta(i)).strftime("%Y-%b-%d").upper()
-        _games = MLBFantasyDataGameAPI(query_type='GamesByDate', date=current_date).games()
-        _stdout.write("Received: {0}\n".format(len(_games)))
-        games.extend(_games)
-    _stdout.write("Total scheduled games retrieved: {0}\n".format(len(games)))
+    def mlb_get_scheduled_game_info(self, _stdout=sys.stdout, days_to_fetch=5):
+        now = datetime.now(pytz.utc)  # + timedelta(days=1)
+        end_date = now + timedelta(days=days_to_fetch)
+        diff = end_date - now
+        games = []
+        for i in range(diff.days + 1):
+            current_date = (now + timedelta(i)).strftime("%Y-%b-%d").upper()
+            _games = MLBFantasyDataGameAPI(query_type='GamesByDate', date=current_date).games()
+            _stdout.write("Received: {0}\n".format(len(_games)))
+            games.extend(_games)
+        _stdout.write("Total scheduled games retrieved: {0}\n".format(len(games)))
+	return games
 
+    def mlb_get_scheduled_game_info_as_skedules(self, _stdout=sys.stdout, days_to_fetch=5):
+        games = self.mlb_get_scheduled_game_info(_stdout, days_to_fetch)
+        skedules = {}
+        for g in games:
+            home_team_info = MLB_TEAM_DICT[g.home_team]
+            home_team = slugify(home_team_info['fullname'])
+            away_team_info = MLB_TEAM_DICT[g.away_team]
+	    away_team = slugify(away_team_info['fullname'])
+            print home_team
+            event = {}
+	    event['starts_on'] = str(g.scheduled_start_datetime)
+            event['ends_on'] = str(g.scheduled_start_datetime + timedelta(hours=5))
+	    event['all_day'] = False
+            event['title'] = '{0} vs. {1}'.format(home_team_info['fullname'],away_team_info['fullname'])
+            event['tz'] = 'US/Eastern'
+            event['images'] = {'home_team_logo_path': home_team_info['logo_image_url'], 'away_team_logo_path': away_team_info['logo_image_url']}
+	    event['tags'] = ["Major League Baseball", '{0}'.format(home_team_info['fullname']), g.ext_game_key]	
+            event['notes'] = "" 
+	    stadium = home_team_info['stadium']
+	    event['location'] = stadium['name']
+            event['address'] = {
+		'formatted': stadium['addr'],
+                'lat': stadium['lat'],
+                'lng': stadium['lng'],
+	    }
+	    if home_team in skedules:
+                skedules[home_team].append(event)
+            else:
+		skedules[home_team] = [event]
+            
+	return skedules
